@@ -3,149 +3,202 @@
 if ( !defined('ABSPATH') ) die('This file should not be accessed directly.');
 
 function shortcode_rs_dealer_form( $atts, $content = '' ) {
+	$search_location = isset($_REQUEST['location']) ? stripslashes($_REQUEST['location']) : false;
+	$search_distance = isset($_REQUEST['distance']) ? stripslashes($_REQUEST['distance']) : false;
 	
-	$dealer_added = isset($_REQUEST['rs_dealer_added']);
-	
-	ob_start();
-	?>
-	<div class="rs-dealer-shortcode <?php echo $dealer_added ? 'rs-expanded' : 'rs-collapsed'; ?>">
-		<div class="rs-inner">
-			
-			<?php
-			if ( !$dealer_added ) {
-				$nonce = wp_create_nonce('rs_dealer_add');
-				
-				$name = isset($_REQUEST['rst']['name']) ? stripslashes($_REQUEST['rst']['name']) : false;
-				$email = isset($_REQUEST['rst']['email']) ? stripslashes($_REQUEST['rst']['email']) : false;
-				$location = isset($_REQUEST['rst']['location']) ? stripslashes($_REQUEST['rst']['location']) : false;
-				$content = isset($_REQUEST['rst']['content']) ? stripslashes($_REQUEST['rst']['content']) : false;
-				?>
-				<div class="rs-form-closed">
-					<div class="rs-dealer-button">
-						<a href="#" class="rs-add-dealer">Submit Your Dealer</a>
-					</div>
-				</div>
-				
-				<div class="rs-form-opened" style="display: none;">
-					<div class="rs-dealer-button">
-						<a href="#" class="rs-close-dealer-form">Close</a>
-					</div>
-					
-					<form action="" method="POST" enctype="multipart/form-data">
-						<div class="rs-field rs-field-name">
-							<label for="rs-dealer-name" class="screen-reader-text">Name:</label>
-							<input type="text" name="rst[name]" id="rs-dealer-name" placeholder="Name" value="<?php echo esc_attr($name); ?>" required>
-						</div>
-						<div class="rs-field rs-field-email">
-							<label for="rs-dealer-email" class="screen-reader-text">Email:</label>
-							<input type="email" name="rst[email]" id="rs-dealer-email" placeholder="Email" value="<?php echo esc_attr($email); ?>" required>
-						</div>
-						<div class="rs-field rs-field-location">
-							<label for="rs-dealer-location" class="screen-reader-text">Organization / Location:</label>
-							<input type="text" name="rst[location]" id="rs-dealer-location" placeholder="Organization / Location" value="<?php echo esc_attr($location); ?>" required>
-						</div>
-						<div class="rs-field rs-field-content">
-							<label for="rs-dealer-content" class="screen-reader-text">Your Dealer:</label>
-							<textarea name="rst[content]" id="rs-dealer-content" placeholder="Your Dealer" required><?php echo esc_attr($content); ?></textarea>
-						</div>
-						<div class="rs-image">
-							<label for="rs-dealer-image" class="rs-label">Upload Photo:</label>
-							<input type="file" name="rst-image" id="rs-dealer-image" required>
-						</div>
-						<div class="rs-submit">
-							<input type="hidden" name="rst[nonce]" value="<?php echo esc_attr($nonce); ?>">
-							<input type="submit" value="Submit">
-						</div>
-					</form>
-				</div>
-				<?php
-				
-			}else{
-				
-				?>
-				<div class="rs-form-opened">
-					<div class="rs-dealer-button">
-						<a href="#" class="rs-close-dealer-all">Close</a>
-					</div>
-					
-					<div class="rs-dealer-added-text">
-						<p><strong>Dealer Added</strong></p>
-						<p>Thank you for submitting a dealer. Please note that we will review your dealer before publishing it to our website.</p>
-					</div>
-				</div>
-				<?php
-			}
-			?>
-		</div>
-	</div>
-	<?php
-	return ob_get_clean();
-}
-add_shortcode( 'rs_dealer_form', 'shortcode_rs_dealer_form' );
-
-
-function rst_add_dealer_from_shortcode() {
-	if ( !isset($_POST['rst']) ) return;
-	
-	$post = stripslashes_deep($_POST['rst']);
-	if ( empty($post['nonce']) || !wp_verify_nonce($post['nonce'], 'rs_dealer_add') ) return;
-	
-	$errors = array();
-	
-	if ( empty($post['name']) ) $errors[] = 'Name is required';
-	
-	if ( empty($post['email']) ) $errors[] = 'Email is required';
-	else if ( !is_email($post['email']) ) $errors[] = 'Email appears to be invalid';
-	
-	if ( empty($post['location']) ) $errors[] = 'Organization / Location is required';
-	if ( empty($post['content']) ) $errors[] = 'Dealer message is required';
-	
-	if ( empty($_FILES['rst-image']) ) $errors[] = 'Image is required';
-	
-	// Die for errors
-	if ( !empty($errors) ) {
-		wp_die('<p><strong>Failed to add dealer:</strong></p><ul><li>'. implode('</li><li>', $errors) . '</li></ul>');
-		exit;
-	}
-	
-	// Create the dealer
 	$args = array(
 		'post_type' => 'rs_dealer',
-	    'post_status' => 'pending',
-	    'post_title' => esc_html($post['name']),
-	    'post_content' => esc_html($post['content']),
+	    'nopaging' => true,
 	);
 	
-	$post_id = wp_insert_post( $args );
-	
-	if ( !$post_id || is_wp_error($post_id) ) {
-		if ( !is_wp_error($post_id) ) $post_id = new WP_Error( 'insert_post_failed_generic', 'Failed to insert dealer into database.' );
-		wp_die( $post_id );
-		exit;
+	if ( $search_location !== false ) {
+		$geocoded_location = rsd_geocode_address_to_coordinates($search_location);
+		
+		if ( $geocoded_location && !is_wp_error($geocoded_location)) {
+			$args['geo_query'] = array(
+				'lat' => $geocoded_location['latitude'],
+				'lng' => $geocoded_location['longitude'],
+				'lat_meta_key' => 'lat',
+				'lng_meta_key' => 'lng',
+				'radius' => $search_distance ? (int) $search_distance : 50,
+				'distance_unit' => 69.0, // 69.0 = Miles, and 111.045 = Kilometers
+			);
+		}else{
+			if ( is_wp_error($geocoded_location) ) {
+				return 'Error ('. esc_html($geocoded_location->get_error_code()) .'): ' . esc_html($geocoded_location->get_error_message());
+			}
+		}
 	}
 	
-	update_post_meta( $post_id, 'email', esc_html($post['email']) );
-	update_post_meta( $post_id, 'organization-location', esc_html($post['location']) );
+	$geo_query = new WP_Query( $args );
 	
-	// Upload the photo
-	// These files need to be included as dependencies when on the front end.
-	require_once( ABSPATH . 'wp-admin/includes/image.php' );
-	require_once( ABSPATH . 'wp-admin/includes/file.php' );
-	require_once( ABSPATH . 'wp-admin/includes/media.php' );
+	ob_start();
 	
-	$attachment_id = media_handle_upload( 'rst-image', $post_id );
-	
-	if ( !$attachment_id || is_wp_error($attachment_id) ) {
-		if ( !is_wp_error($attachment_id) ) $attachment_id = new WP_Error( 'upload_attachment_failed_generic', 'Failed to upload image to the website.' );
-		wp_die( $attachment_id );
-		exit;
+	if ( $geo_query->have_posts() ) {
+		
+		$map_locations = array();
+		
+		while( $geo_query->have_posts() ): $geo_query->the_post();
+			global $post;
+			
+			$distance = isset($post->distance_value) ? preg_replace('/\.?0+$/', '', number_format($post->distance_value, 2)) : false;
+			if ( $distance ) $distance = sprintf(_n('%s Mile', '%s Miles', $distance), $distance);
+			
+			$map_locations[] = array(
+				'title' => get_the_title(),
+			    'address' => get_field( 'address' ),
+			    'lat' => get_post_meta( get_the_ID(), 'lat', true ),
+			    'lng' => get_post_meta( get_the_ID(), 'lng', true ),
+			    'distance' => $distance
+			);
+		endwhile;
+		wp_reset_postdata();
+		
+		$map_options = array(
+			'zoom' => 9,
+		);
+		
+		global $RS_Dealers;
+		$icon_url = $RS_Dealers->plugin_url . '/assets/dealer-pin.png';
+		
+		?>
+		<div class="rs-dealers">
+			<div class="rs-dealer-map">
+				<div class="rsd-google-map">
+					<div id="rsd-map"></div>
+					<script type="text/javascript" src="//maps.googleapis.com/maps/api/js?key=<?php echo esc_attr(rsd_get_maps_api_key()); ?>&sensor=false"></script>
+					<script>
+						var rsd_map = {
+							container: false,
+							map: false,
+							bounds: false,
+							has_bounds: false,
+							markers: [],
+							infowindow: false,
+							icon: {
+								url: <?php echo json_encode($icon_url); ?>,
+								size: new google.maps.Size( 30, 30 ),
+								scaledSize: new google.maps.Size( 30, 30 ),
+								origin: new google.maps.Point( 0, 0 ),
+								anchor: new google.maps.Point( 15, 15 )
+							},
+							locations: <?php echo json_encode($map_locations); ?>,
+							map_options: <?php echo json_encode($map_options); ?>
+						};
+					</script>
+				</div>
+				<div class="rsd-map-search-overlay">
+					<?php __rsd_dealer_search_location_form(); ?>
+				</div>
+			</div>
+			
+			<div class="rs-dealer-list">
+				<?php
+				foreach( $map_locations as $loc ) {
+					$title = $loc['title'];
+					$address = $loc['address'];
+					$distance = $loc['distance'];
+					?>
+					<article <?php post_class('rs-dealer-item'); ?>>
+						
+						<header class="loop-header">
+							<h2 class="loop-title"><?php echo esc_html( $title ); ?></h2>
+						</header>
+						
+						<?php if ( $address || $distance ) { ?>
+						<div class="loop-body">
+						
+							<?php if ( $address ) { ?>
+								<div class="loop-content">
+									<?php echo nl2br(esc_html($address)); ?>
+								</div>
+							<?php } ?>
+							
+							<?php if ( $distance ) { ?>
+								<div class="loop-distance">
+									<?php echo $distance; ?>
+								</div>
+							<?php } ?>
+						
+						</div>
+						<?php } ?>
+					
+					</article>
+					<?php
+				}
+				?>
+			</div>
+		</div>
+		<?php
+		
+	}else{
+		
+		if ( $search_location ) {
+			?>
+			<p><em>Sorry, no dealers were found near your location.</em></p>
+			
+			<?php
+			__rsd_dealer_search_location_form();
+		}else{
+			?>
+			<p><em>Sorry, no dealers are available at the moment.</em></p>
+			<?php
+		}
 	}
 	
-	// Make it the featured image for the post
-	set_post_thumbnail( $post_id, $attachment_id );
-	
-	// Make the shortcode display a message telling the user that the dealer was added.
-	wp_redirect( add_query_arg( array('rs_dealer_added' => 1) ) );
-	exit;
+	return ob_get_clean();
 }
-add_action( 'init', 'rst_add_dealer_from_shortcode' );
+add_shortcode( 'rs_dealers', 'shortcode_rs_dealer_form' );
+
+function __rsd_dealer_search_location_form() {
+	$search_location = isset($_REQUEST['location']) ? stripslashes($_REQUEST['location']) : false;
+	$search_distance = isset($_REQUEST['distance']) ? stripslashes($_REQUEST['distance']) : false;
+	
+	?>
+	<form action="" method="GET" class="rsd-map-search-form">
+		<label for="rs-location">Find a Dealer:</label>
+		
+		<div class="dealer-field location"><input type="text" name="location" id="rs-location" placeholder="City/State or Zip Code" value="<?php echo $search_location ? esc_attr($search_location) : ""; ?>"></div>
+		
+		<div class="dealer-field distance"><input type="text" name="distance" id="rs-distance" placeholder="Distance (Miles)" value="<?php echo $search_distance ? esc_attr($search_distance) : ""; ?>"></div>
+		
+		<div class="dealer-submit"><input type="submit" value="Search"></div>
+	</form>
+	<?php
+}
+
+function rsd_geocode_address_to_coordinates( $address ) {
+	$key = rsd_get_maps_api_key();
+	
+	$args = array();
+	$args['address'] = $address;
+	if ( $key ) $args['key'] = $key;
+	
+	$url = 'https://maps.googleapis.com/maps/api/geocode/json';
+	$geocode = wp_remote_get( add_query_arg( $args, $url ) );
+	
+	// If the request failed, or we're missing crucial information, return with an error
+	if ( !$geocode || is_wp_error($geocode) || $geocode['response']['message'] !== 'OK' || !$geocode['body'] ) {
+		return new WP_Error( 'geocoding_failed', 'The Google Geocoding lookup failed. Unable to connect to the server or unexpected response from the server.', $geocode );
+	}
+	
+	$json = json_decode( $geocode['body'], true );
+	
+	// If the request was OK but the data is no good, return with an error
+	if ( !$json || !isset($json['results']) || !$json['results'] || !isset($json['results'][0]['geometry']['location']) ) {
+		return new WP_Error( 'geocoding_no_location', 'No results were found for the provided location.', $geocode );
+	}
+	
+	$lat = (float) $json['results'][0]['geometry']['location']['lat'];
+	$lng = (float) $json['results'][0]['geometry']['location']['lng'];
+	
+	return array(
+		'latitude' => $lat,
+		'longitude' => $lng,
+		'result' => $geocode,
+	);
+}
+
+function rsd_get_maps_api_key() {
+	return apply_filters( 'locator_geocoding_key', 'AIzaSyDwt4-tH-EogatekFi7QuQsg95OQYl4Hd8' );
+}

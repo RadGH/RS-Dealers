@@ -2,7 +2,7 @@
 /*
  * Plugin Name: RS Dealers
  * Plugin URI: http://radleysustaire.com/
- * Description: Display dealers on your site using Google Maps.
+ * Description: Display dealers on your site using Google Maps using the shortcode [rs_dealers].
  * Version: 1.0.0
  * Author: Radley Sustaire
  * Author URI: http://radleysustaire.com/
@@ -54,6 +54,10 @@ if ( !class_exists( 'RS_Dealers' ) ) {
 			include( $this->plugin_dir . '/includes/dealers.php' );
 			include( $this->plugin_dir . '/includes/shortcode.php' );
 			include( $this->plugin_dir . '/includes/enqueue.php' );
+			
+			if ( !class_exists('GeoQueryContext') ) {
+				include( $this->plugin_dir . '/assets/geo-query/geo-query.php' );
+			}
 		}
 	}
 }
